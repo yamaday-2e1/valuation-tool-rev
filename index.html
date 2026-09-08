@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PRO-VALUATION PORTAL</title>
+  <!-- React & ReactDOM CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel for JSX compilation in browser -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #0B132B;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // ---- Terminal/Bloomberg-like Design Tokens ----
+    const C = {
+      bg: "#0B132B",          // ディープネイビー背景
+      panel: "#1C2541",       // パネル背景
+      panelLight: "#222D4F",  // 入力フォーカスや強調用
+      cyan: "#00E5FF",        // インプライド成長率のネオンアクセント
+      gold: "#FFC400",        // インプライド期待リターンのネオンアクセント
+      ink: "#F0F3F8",         // メイン文字（高コントラスト白）
+      sub: "#8F9CAE",         // サブ文字（グレー）
+      line: "#2C3D63",        // グリッドライン
+      borderFocus: "#5E72E4", // フォーカス枠線
+      danger: "#FF5252"       // エラー色
+    };
+
+    const FONT = `"Share Tech Mono", "Noto Sans JP", "Yu Gothic Medium", sans-serif`;
+    const MONO = `"Roboto Mono", "Courier New", monospace`;
+
+    // 一言コメントのプリセット
+    const COMMENT_PRESETS = [
+      "◆ MARKET SYSTEM REPORT: 現状の市場株価は、アナリスト予測に対して強気の織り込みを示唆しています。",
+      "◆ SYSTEM DIALOGUE: 電卓回路に高負荷検知。非常に精緻な数理整合性をクリアしました。",
+      "◆ VALUATION PERSPECTIVE: 簿価と市場価格のギャップは、将来の非連続な成長期待を反映しています。",
+      "◆ ACADEMIC VERIFICATION: この理論値は残余利益モデル（RIV）の最適解としてゼミ提出可能です。",
+      "◆ INSIGHT: 高水準のROCE（自己資本利益率）は、この企業のエコノミック・モート（経済的な堀）を裏付けています。",
+    ];
+
+    function pickRandomComment() {
+      return COMMENT_PRESETS[Math.floor(Math.random() * COMMENT_PRESETS.length)];
+    }
+
+    function fmt(n, digits = 2) {
+      if (!isFinite(n)) return "—";
+      return n.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    }
+
+    // ---- SVG Icons ----
+    function IconTrendingUp({ size = 20, color = "currentColor" }) {
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+          <polyline points="16 7 22 7 22 13" />
+        </svg>
+      );
+    }
+
+    function IconTarget({ size = 20, color = "currentColor" }) {
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <circle cx="12" cy="12" r="6" />
+          <circle cx="12" cy="12" r="2" />
+        </svg>
+      );
+    }
+
+    // ---- Count-up number ----
+    function TickerNumber({ value, suffix, digits, big, color }) {
+      const [display, setDisplay] = useState(0);
+      const raf = useRef(null);
+
+      useEffect(() => {
+        const start = performance.now();
+        const duration = 1200;
+        const from = 0;
+        const to = value;
+        function tick(now) {
+          const t = Math.min(1, (now - start) / duration);
+          const eased = 1 - Math.pow(1 - t, 4);
+          setDisplay(from + (to - from) * eased);
+          if (t < 1) raf.current = requestAnimationFrame(tick);
+        }
+        raf.current = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf.current);
+      }, [value]);
+
+      return (
+        <span
+          style={{
+            fontFamily: MONO,
+            fontVariantNumeric: "tabular-nums",
+            fontWeight: 700,
+            fontSize: big ? "clamp(2.8rem,10vw,4.5rem)" : "2.2rem",
+            color: color || C.ink,
+            letterSpacing: "-0.02em",
+            textShadow: `0 0 15px ${color}55`
+          }}
+        >
+          {fmt(display, digits)}
+          <span style={{ fontSize: "0.45em", marginLeft: 8, color: color || C.ink, fontFamily: FONT, fontWeight: 700 }}>
+            {suffix}
+          </span>
+        </span>
+      );
+    }
+
+    // ---- Terminal Field ----
+    function Field({ label, unit, value, onChange, placeholder }) {
+      return (
+        <label style={{ display: "block", marginBottom: 18 }}>
+          <div style={{ fontSize: 11, color: C.sub, marginBottom: 6, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            {label}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", border: `1px solid ${C.line}`, borderRadius: 4, background: C.bg, overflow: "hidden" }}>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              onWheel={(e) => e.currentTarget.blur()}
+              placeholder={placeholder}
+              style={{
+                flex: 1,
+                padding: "12px 14px",
+                border: "none",
+                outline: "none",
+                fontFamily: MONO,
+                fontSize: 16,
+                color: C.ink,
+                background: "transparent",
+              }}
+            />
+            {unit && (
+              <div style={{ padding: "0 14px", color: C.sub, fontSize: 13, fontFamily: FONT, borderLeft: `1px solid ${C.line}`, background: "#151F38" }}>
+                {unit}
+              </div>
+            )}
+          </div>
+        </label>
+      );
+    }
+
+    // ---- Terminal Dropdown ----
+    function RateSelect({ label, value, onChange }) {
+      const presets = [5, 8, 10, 12, 15];
+      const isPreset = presets.includes(Number(value));
+      const [mode, setMode] = useState(isPreset || value === "" ? "preset" : "custom");
+
+      return (
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 11, color: C.sub, marginBottom: 6, fontWeight: 700, letterSpacing: "0.1em" }}>
+            {label}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ position: "relative", flex: mode === "preset" ? 1 : "0 0 auto" }}>
+              <select
+                value={mode === "preset" ? value || "" : ""}
+                onChange={(e) => {
+                  if (e.target.value === "__custom") {
+                    setMode("custom");
+                    onChange("");
+                  } else {
+                    setMode("preset");
+                    onChange(e.target.value);
+                  }
+                }}
+                style={{
+                  appearance: "none",
+                  width: "100%",
+                  padding: "12px 36px 12px 14px",
+                  border: `1px solid ${C.line}`,
+                  borderRadius: 4,
+                  background: C.bg,
+                  fontFamily: FONT,
+                  fontSize: 15,
+                  color: C.ink,
+                  cursor: "pointer",
+                }}
+              >
+                <option value="" disabled style={{ background: C.bg }}>SELECT RATE</option>
+                {presets.map((p) => (
+                  <option key={p} value={p} style={{ background: C.bg }}>{p}%</option>
+                ))}
+                <option value="__custom" style={{ background: C.bg }}>CUSTOM (手入力)...</option>
+              </select>
+              <div style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", display: "flex", alignItems: "center" }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.sub} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+              </div>
+            </div>
+            {mode === "custom" && (
+              <div style={{ display: "flex", alignItems: "center", border: `1px solid ${C.line}`, borderRadius: 4, background: C.bg, flex: 1 }}>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  autoFocus
+                  value={value}
+                  onChange={(e) => onChange(e.target.value)}
+                  onWheel={(e) => e.currentTarget.blur()}
+                  placeholder="任意の比率"
+                  style={{ flex: 1, padding: "12px 14px", border: "none", outline: "none", fontFamily: MONO, fontSize: 16, color: C.ink, background: "transparent" }}
+                />
+                <div style={{ padding: "0 14px", color: C.sub, fontSize: 13, borderLeft: `1px solid ${C.line}`, background: "#151F38" }}>%</div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function ValuationTool() {
+      const [screen, setScreen] = useState("home");
+      const [mode, setMode] = useState(null);
+
+      const [p0, setP0] = useState("");
+      const [b0, setB0] = useState("");
+      const [e1, setE1] = useState("");
+      const [div1, setDiv1] = useState("");
+      const [rate, setRate] = useState("");
+      const [usePeriod2, setUsePeriod2] = useState(false);
+      const [e2, setE2] = useState("");
+      const [div2, setDiv2] = useState("");
+
+      const [result, setResult] = useState(null);
+      const [error, setError] = useState("");
+      const [comment, setComment] = useState("");
+      const [reveal, setReveal] = useState(false);
+      const [showHelp, setShowHelp] = useState(false);
+
+      function goHome() {
+        setScreen("home");
+        setMode(null);
+        setP0(""); setB0(""); setE1(""); setDiv1(""); setRate("");
+        setUsePeriod2(false); setE2(""); setDiv2("");
+        setResult(null); setError(""); setComment(""); setReveal(false);
+      }
+
+      function chooseMode(m) {
+        setMode(m);
+        setScreen("input");
+        setUsePeriod2(false); setE2(""); setDiv2("");
+        setResult(null); setError(""); setReveal(false);
+      }
+
+      // クリーンサープラス関係で BPS(t) = BPS(t-1) + EPS(t) - DPS(t) を積み上げつつ、
+      // 各期の ROCE(t)=EPS(t)/BPS(t-1) と RE(t)=(ROCE(t)-r)×BPS(t-1) を計算する。
+      function buildResidualIncomeChain(B0, r, periods) {
+        let Bprev = B0;
+        const ROCEs = [], REs = [], Bchain = [B0];
+        for (const p of periods) {
+          if (Bprev === 0) throw new Error("BOOK_VALUE_ZERO");
+          const ROCE = p.E / Bprev;
+          const RE = (ROCE - r) * Bprev;
+          ROCEs.push(ROCE);
+          REs.push(RE);
+          const Bnext = Bprev + p.E - (isFinite(p.D) ? p.D : 0);
+          Bchain.push(Bnext);
+          Bprev = Bnext;
+        }
+        return { ROCEs, REs, Bchain };
+      }
+
+      // 明示予測期間(1〜2期)の残余利益 + 最終期以降の永続成長する継続価値、という構造から
+      // インプライド成長率 g を逆算する（n=1のときは従来の単純式と数学的に同値）。
+      function solveImpliedGrowth(P0, B0, r, REs) {
+        const n = REs.length;
+        let S = 0;
+        for (let t = 0; t < n; t++) S += REs[t] / Math.pow(1 + r, t + 1);
+        const REn = REs[n - 1];
+        if (REn === 0) throw new Error("RE_ZERO");
+        const D = (P0 - B0) - S;
+        const K = D * Math.pow(1 + r, n) / REn;
+        if (Math.abs(K + 1) < 1e-9) throw new Error("SINGULAR");
+        const g = (K * r - 1) / (K + 1);
+        return g;
+      }
+
+      function compute() {
+        const P0 = parseFloat(p0), B0 = parseFloat(b0), E1 = parseFloat(e1);
+        const D1 = div1 === "" ? 0 : parseFloat(div1);
+        setError("");
+        if (!isFinite(P0) || !isFinite(B0) || !isFinite(E1)) {
+          setError("!!! INPUT ERROR: 全ての必要項目（数値）をシステムにロードしてください。");
+          return;
+        }
+        if (!isFinite(D1)) {
+          setError("!!! INPUT ERROR: 予想配当（DPS）が数値として認識できません。");
+          return;
+        }
+        if (B0 === 0) {
+          setError("!!! MATH ERROR: 簿価を0に指定することは不可能です。");
+          return;
+        }
+
+        if (mode === "growth") {
+          const r = parseFloat(rate) / 100;
+          if (!isFinite(r)) {
+            setError("!!! REQUIREMENT ERROR: 要求リターン比率を設定してください。");
+            return;
+          }
+
+          const periods = [{ E: E1, D: D1 }];
+          let E2 = null, D2 = 0;
+          if (usePeriod2) {
+            E2 = parseFloat(e2);
+            D2 = div2 === "" ? 0 : parseFloat(div2);
+            if (!isFinite(E2) || !isFinite(D2)) {
+              setError("!!! INPUT ERROR: 第2期の予想EPS・DPSを数値として入力してください。");
+              return;
+            }
+            periods.push({ E: E2, D: D2 });
+          }
+
+          try {
+            const { ROCEs, REs, Bchain } = buildResidualIncomeChain(B0, r, periods);
+            const g = solveImpliedGrowth(P0, B0, r, REs);
+            if (!isFinite(g)) throw new Error("NOT_FINITE");
+            setResult({
+              n: periods.length,
+              ROCE: ROCEs[0], RE1: REs[0],
+              ROCE2: usePeriod2 ? ROCEs[1] : null,
+              RE2: usePeriod2 ? REs[1] : null,
+              B1: Bchain[1],
+              r, g,
+              headline: g * 100,
+              headlineSuffix: "%",
+              headlineDigits: 2,
+              subHeadline: `IMPLIED GROWTH MULTIPLIER: ${fmt(1 + g, 3)} (1 + g)`,
+            });
+          } catch (err) {
+            if (err.message === "RE_ZERO") {
+              setError("!!! MATH ERROR: 最終予測期の残余利益がゼロのため、成長率を逆算できません。");
+            } else if (err.message === "BOOK_VALUE_ZERO") {
+              setError("!!! MATH ERROR: 計算途中の簿価（BPS）が0になり、ROCEが定義できません。");
+            } else {
+              setError("!!! ALGORITHM LIMITATION: 入力値の組み合わせが特異点となり、成長率を逆算できません。");
+            }
+            return;
+          }
+        } else {
+          const g = parseFloat(rate) / 100;
+          if (!isFinite(g)) {
+            setError("!!! REQUIREMENT ERROR: 成長率基準（g）を入力してください。");
+            return;
+          }
+          const ROCE = E1 / B0;
+          const k = P0 / B0 - 1;
+          const r = (ROCE + k * g) / (k + 1);
+          const RE1 = (ROCE - r) * B0;
+          setResult({
+            n: 1,
+            ROCE, RE1, k, g, r,
+            headline: r * 100,               // 要求リターンもパーセントがメイン
+            headlineSuffix: "%",
+            headlineDigits: 2,
+            subHeadline: `PRICE-TO-BOOK RATIO: ${fmt(P0 / B0, 2)}x`,
+          });
+        }
+        setComment(pickRandomComment());
+        setScreen("result");
+        setReveal(false);
+        setTimeout(() => setReveal(true), 60);
+      }
+
+      const isGrowth = mode === "growth";
+      const colorAccent = isGrowth ? C.cyan : C.gold;
+
+      return (
+        <div
+          style={{
+            minHeight: "100vh",
+            background: C.bg,
+            fontFamily: FONT,
+            color: C.ink,
+            display: "flex",
+            justifyContent: "center",
+            padding: "40px 16px",
+            boxSizing: "border-box"
+          }}
+        >
+          <style>{`
+            @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Roboto+Mono:wght@400;700&family=Noto+Sans+JP:wght@400;700;900&display=swap');
+            
+            .vt-container { width: 100%; max-width: 480px; margin: 0 auto; }
+            .vt-home-cards { display: flex; flex-direction: column; gap: 16px; }
+            .vt-card-btn {
+              width: 100%;
+              text-align: left;
+              background: ${C.panel};
+              border: 1px solid ${C.line};
+              border-radius: 6px;
+              padding: 24px;
+              cursor: pointer;
+              display: flex;
+              align-items: center;
+              gap: 20px;
+              transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+              box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            }
+            .vt-card-btn:hover {
+              border-color: var(--hover-color);
+              background: #222D4F;
+              transform: translateY(-2px);
+              box-shadow: 0 8px 24px var(--shadow-color);
+            }
+            .vt-input-layout, .vt-result-layout { display: block; }
+            @media (min-width: 820px) {
+              .vt-container { max-width: 960px; }
+              .vt-home-cards { flex-direction: row; gap: 24px; }
+              .vt-home-cards > button { flex: 1; }
+              .vt-input-layout { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 28px; align-items: start; }
+              .vt-result-layout { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 28px; align-items: start; }
+              .vt-result-layout .vt-result-hero { grid-row: 1 / 3; margin-bottom: 0 !important; }
+            }
+
+            input[type="number"]::-webkit-outer-spin-button,
+            input[type="number"]::-webkit-inner-spin-button {
+              -webkit-appearance: none;
+              margin: 0;
+            }
+            input[type="number"] {
+              -moz-appearance: textfield;
+              appearance: textfield;
+            }
+          `}</style>
+          
+          <div className="vt-container">
+            {/* ---------------- HOME ---------------- */}
+            {screen === "home" && (
+              <div>
+                <div style={{ textAlign: "center", marginBottom: 48, marginTop: 12 }}>
+                  <div style={{ fontSize: 13, letterSpacing: "0.3em", color: C.gold, fontWeight: 900, marginBottom: 12 }}>
+                    QUANTITATIVE SYSTEM v1.0
+                  </div>
+                  <h1 style={{ fontSize: 32, fontWeight: 900, color: C.ink, margin: 0, lineHeight: 1.3, letterSpacing: "-0.012em" }}>
+                    バリュエーション ✕ 分析ターミナル
+                  </h1>
+                  <p style={{ color: C.sub, fontSize: 14, marginTop: 8 }}>
+                    インプライド成長率・期待リターンの数学的逆算エンジン
+                  </p>
+                  <div style={{ width: 80, height: 2, background: C.gold, margin: "24px auto 0" }} />
+
+                  <button
+                    type="button"
+                    onClick={() => setShowHelp(true)}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 8, marginTop: 24,
+                      background: "none", border: `1px solid ${C.line}`, borderRadius: 20,
+                      color: C.sub, fontSize: 12, fontWeight: 700, letterSpacing: "0.08em",
+                      padding: "8px 18px", cursor: "pointer"
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.borderColor = C.gold}
+                    onMouseLeave={(e) => e.currentTarget.style.borderColor = C.line}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.sub} strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 2-3 4" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+                    このツールの使い方
+                  </button>
+                </div>
+
+                <div className="vt-home-cards">
+                  <button
+                    className="vt-card-btn"
+                    onClick={() => chooseMode("growth")}
+                    style={{ "--hover-color": C.cyan, "--shadow-color": "rgba(0,229,255,0.15)" }}
+                  >
+                    <div style={{ width: 56, height: 56, borderRadius: 6, background: "rgba(0,229,255,0.12)", border: `1px solid ${C.cyan}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <IconTrendingUp color={C.cyan} size={28} />
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 19, color: C.ink }}>インプライド成長率 (implied g)</div>
+                      <div style={{ fontSize: 13, color: C.sub, marginTop: 6, lineHeight: 1.4 }}>
+                        現在のマーケット株価から逆算し、市場が想定する企業の永続/期待成長率を算出します。
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    className="vt-card-btn"
+                    onClick={() => chooseMode("return")}
+                    style={{ "--hover-color": C.gold, "--shadow-color": "rgba(255,196,0,0.15)" }}
+                  >
+                    <div style={{ width: 56, height: 56, borderRadius: 6, background: "rgba(255,196,0,0.12)", border: `1px solid ${C.gold}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <IconTarget color={C.gold} size={28} />
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 19, color: C.ink }}>インプライド期待リターン (implied r)</div>
+                      <div style={{ fontSize: 13, color: C.sub, marginTop: 6, lineHeight: 1.4 }}>
+                        指定の成長率から逆算し、現在の市場価格で投資家が要求している期待収益率を評価します。
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ---------------- INPUT ---------------- */}
+            {screen === "input" && (
+              <div>
+                <button onClick={goHome} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: C.sub, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 28, letterSpacing: "0.05em", fontWeight: 700 }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.sub} strokeWidth="2.5"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg> RETURN TO GATEWAY
+                </button>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 28 }}>
+                  <div style={{ width: 44, height: 44, borderRadius: 4, background: `${colorAccent}15`, border: `1px solid ${colorAccent}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {isGrowth ? <IconTrendingUp color={C.cyan} size={22} /> : <IconTarget color={C.gold} size={22} />}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: C.sub, letterSpacing: "0.15em", fontWeight: 700 }}>CALCULATION PROCESS</div>
+                    <h2 style={{ fontSize: 24, fontWeight: 900, color: C.ink, margin: 0 }}>
+                      {isGrowth ? "IMPLIED GROWTH ANALYZER" : "IMPLIED EXPECTED RETURN"}
+                    </h2>
+                  </div>
+                </div>
+
+                <div className="vt-input-layout">
+                  <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 6, padding: "28px 24px", boxShadow: "0 6px 18px rgba(0,0,0,0.2)" }}>
+                    <Field label="株価 [P0]" unit="JPY" value={p0} onChange={setP0} placeholder="例）2450.00" />
+                    <Field label="一株当たり純資産/簿価 [B0]" unit="JPY" value={b0} onChange={setB0} placeholder="例）1620.00" />
+                    <Field label="予想一株当たり利益 [E1]" unit="JPY" value={e1} onChange={setE1} placeholder="例）185.30" />
+
+                    {isGrowth ? (
+                      <>
+                        <Field label="予想配当 [D1]" unit="JPY" value={div1} onChange={setDiv1} placeholder="（任意項目・清算後簿価の算出に使用）" />
+
+                        <button
+                          type="button"
+                          onClick={() => setUsePeriod2(v => !v)}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 8,
+                            background: "none", border: `1px dashed ${C.line}`, borderRadius: 4,
+                            color: usePeriod2 ? C.cyan : C.sub, fontSize: 12, fontWeight: 700,
+                            letterSpacing: "0.05em", cursor: "pointer", padding: "10px 12px",
+                            width: "100%", marginBottom: usePeriod2 ? 18 : 24, boxSizing: "border-box"
+                          }}
+                        >
+                          <span style={{ fontSize: 15, lineHeight: 1 }}>{usePeriod2 ? "－" : "＋"}</span>
+                          第2期を追加（任意・成長率の精度を上げます）
+                        </button>
+
+                        {usePeriod2 && (
+                          <div style={{ background: "#151F38", border: `1px solid ${C.line}`, borderRadius: 4, padding: "16px 14px", marginBottom: 24 }}>
+                            <Field label="第2期 予想一株当たり利益 [E2]" unit="JPY" value={e2} onChange={setE2} placeholder="例）201.40" />
+                            <div style={{ marginBottom: 0 }}>
+                              <Field label="第2期 予想配当 [D2]" unit="JPY" value={div2} onChange={setDiv2} placeholder="（任意項目）" />
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 12, color: C.sub, lineHeight: 1.7, marginBottom: 20, padding: "10px 12px", background: "#151F38", borderRadius: 4, border: `1px solid ${C.line}` }}>
+                        ※期待リターンの逆算は第1期の情報のみで行います（DPS・第2期の入力は不要です）。
+                      </div>
+                    )}
+
+                    <div style={{ height: 1, background: C.line, margin: "12px 0 24px" }} />
+
+                    <RateSelect
+                      label={isGrowth ? "要求リターン (割引率 r)" : "永続成長率設定 (g)"}
+                      value={rate}
+                      onChange={setRate}
+                    />
+
+                    {error && (
+                      <div style={{ color: C.danger, fontSize: 13, marginBottom: 18, fontWeight: 700, letterSpacing: "0.02em", fontFamily: MONO, borderLeft: `3px solid ${C.danger}`, paddingLeft: 10 }}>{error}</div>
+                    )}
+
+                    <button
+                      onClick={compute}
+                      style={{
+                        width: "100%",
+                        padding: "16px",
+                        borderRadius: 4,
+                        border: "none",
+                        background: colorAccent,
+                        color: C.bg,
+                        fontSize: 16,
+                        fontWeight: 900,
+                        letterSpacing: "0.08em",
+                        cursor: "pointer",
+                        marginTop: 10,
+                        boxShadow: `0 4px 14px ${colorAccent}55`,
+                        transition: "opacity 0.2s"
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.opacity = 0.85}
+                      onMouseLeave={(e) => e.currentTarget.style.opacity = 1}
+                    >
+                      {isGrowth ? "EVALUATE IMPLIED GROWTH RATE" : "EVALUATE EXPECTED RETURN"}
+                    </button>
+                  </div>
+
+                  <div style={{ background: "#111A30", border: `1px solid ${C.line}`, borderRadius: 6, padding: "24px", color: C.sub }}>
+                    <div style={{ fontSize: 12, fontWeight: 900, color: colorAccent, marginBottom: 14, letterSpacing: "0.1em" }}>SYSTEM ALGORITHM</div>
+                    <div style={{ fontSize: 13, color: C.ink, lineHeight: 2, fontFamily: MONO, padding: "12px", background: "#080F21", borderRadius: 4, borderLeft: `2px solid ${C.line}` }}>
+                      ROCE(t) = EPS(t) / BPS(t−1)
+                      <br />
+                      RE(t) = ( ROCE(t) − r ) × BPS(t−1)
+                      {isGrowth ? (
+                        usePeriod2 ? (
+                          <>
+                            <br />
+                            BPS₁ = BPS₀ + EPS₁ − DPS₁
+                            <br />
+                            S = RE₁/(1+r) + RE₂/(1+r)²
+                            <br />
+                            g：P₀ = B₀ + S + [RE₂(1+g)/(r−g)]/(1+r)² を解く
+                          </>
+                        ) : (
+                          <>
+                            <br />
+                            g = r − RE₁ / (P₀ − B₀)
+                          </>
+                        )
+                      ) : (
+                        <>
+                          <br />
+                          r = ( ROCE₁ + k × g ) / ( k + 1 )
+                          <br />
+                          *k = P₀/B₀ − 1　※期待リターンは第1期のみで算出
+                        </>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 12, color: C.sub, marginTop: 18, lineHeight: 1.8 }}>
+                      ※本モジュールは、オルソン理論モデル（Edwards-Bell-Ohlson valuation）及び残余利益モデル（RIV）フレームワークを採用し、株価に潜在的に織り込まれた定量ファクターを逆数展開によりリアルタイム導出しています。
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ---------------- RESULT ---------------- */}
+            {screen === "result" && result && (
+              <div>
+                <button onClick={() => setScreen("input")} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: C.sub, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 28, fontWeight: 700 }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.sub} strokeWidth="2.5"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg> ADJUST COEFFICIENTS
+                </button>
+
+                <div className="vt-result-layout">
+                  <div
+                    className="vt-result-hero"
+                    style={{
+                      position: "relative",
+                      background: "#111A30",
+                      border: `2px solid ${colorAccent}`,
+                      borderRadius: 6,
+                      padding: "44px 24px",
+                      textAlign: "center",
+                      overflow: "hidden",
+                      marginBottom: 20,
+                      boxShadow: `0 0 25px ${colorAccent}1a`
+                    }}
+                  >
+                    <div style={{ fontSize: 12, letterSpacing: "0.25em", color: colorAccent, fontWeight: 900, marginBottom: 16 }}>
+                      {isGrowth ? "IMPLIED GROWTH VECTOR" : "EXPECTED RETURN VECTOR"}
+                    </div>
+                    {reveal ? (
+                      <TickerNumber value={result.headline} suffix={result.headlineSuffix} digits={result.headlineDigits} big color={colorAccent} />
+                    ) : (
+                      <div style={{ height: "4.5rem" }} />
+                    )}
+                    <div style={{ marginTop: 18, fontSize: 14, color: C.ink, fontWeight: 700, fontFamily: MONO, opacity: reveal ? 1 : 0, transition: "opacity 0.4s ease 0.8s", letterSpacing: "0.05em" }}>
+                      {result.subHeadline}
+                    </div>
+                    <div
+                      style={{
+                        width: reveal ? "100px" : "0px",
+                        height: 2,
+                        background: colorAccent,
+                        margin: "24px auto 0",
+                        transition: "width 0.6s ease 0.3s",
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 6, padding: "24px", marginBottom: 20 }}>
+                    <div style={{ fontSize: 11, fontWeight: 900, color: C.sub, marginBottom: 16, letterSpacing: "0.15em" }}>METRIC ANALYSIS REPORT</div>
+                    <Row label={result.n === 2 ? "ROCE₁ (自己資本利益率)" : "ROCE (自己資本利益率)"} value={`${fmt(result.ROCE * 100, 2)}%`} />
+                    {isGrowth ? (
+                      <>
+                        <Row label={result.n === 2 ? "RE₁ (第1期 予想残余利益)" : "RE (予想残余利益)"} value={fmt(result.RE1, 2)} />
+                        {result.n === 2 && (
+                          <>
+                            <Row label="ROCE₂ (自己資本利益率)" value={`${fmt(result.ROCE2 * 100, 2)}%`} />
+                            <Row label="RE₂ (第2期 予想残余利益)" value={fmt(result.RE2, 2)} />
+                          </>
+                        )}
+                        <Row label="DISCOUNT RATE (割引率 r)" value={`${fmt(result.r * 100, 2)}%`} />
+                        <Row label="TARGET GROWTH (逆算成長率 g)" value={`${fmt(result.g * 100, 2)}%`} strong color={C.cyan} />
+                      </>
+                    ) : (
+                      <>
+                        <Row label="BASELINE GROWTH (想定成長率 g)" value={`${fmt(result.g * 100, 2)}%`} />
+                        <Row label="REQUIRED RETURN (逆算割引率 r)" value={`${fmt(result.r * 100, 2)}%`} strong color={C.gold} />
+                      </>
+                    )}
+                  </div>
+
+                  <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 6, padding: "24px", marginBottom: 20 }}>
+                    <div style={{ fontSize: 11, fontWeight: 900, color: C.sub, marginBottom: 8, letterSpacing: "0.1em" }}>VALUATOR ANALYST LOGS</div>
+                    <textarea
+                      value={comment}
+                      onChange={(e) => setComment(e.target.value)}
+                      placeholder="アナリストノートを追記..."
+                      rows={3}
+                      style={{
+                        width: "100%",
+                        border: `1px solid ${C.line}`,
+                        borderRadius: 4,
+                        padding: "12px",
+                        fontFamily: MONO,
+                        fontSize: 13,
+                        color: C.ink,
+                        background: C.bg,
+                        resize: "none",
+                        outline: "none",
+                        boxSizing: "border-box",
+                        lineHeight: "1.6"
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <button
+                  onClick={goHome}
+                  style={{
+                    width: "100%",
+                    padding: "14px",
+                    borderRadius: 4,
+                    border: `1px solid ${C.line}`,
+                    background: "#151F38",
+                    color: C.ink,
+                    fontSize: 14,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 10,
+                    boxSizing: "border-box",
+                    transition: "all 0.15s",
+                    letterSpacing: "0.08em"
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.borderColor = C.ink}
+                  onMouseLeave={(e) => e.currentTarget.style.borderColor = C.line}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.ink} strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><polyline points="3 3 3 8 8 8" /></svg> RESET QUANTITATIVE CORE
+                </button>
+              </div>
+            )}
+          </div>
+          {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+        </div>
+      );
+    }
+
+    function HelpModal({ onClose }) {
+      return (
+        <div
+          onClick={onClose}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(6,10,22,0.75)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 20, zIndex: 50
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%", maxWidth: 560, maxHeight: "86vh", overflowY: "auto",
+              background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8,
+              padding: "28px 26px", boxShadow: "0 20px 60px rgba(0,0,0,0.5)"
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+              <div style={{ fontSize: 13, letterSpacing: "0.15em", color: C.gold, fontWeight: 900 }}>
+                システム説明書
+              </div>
+              <button
+                onClick={onClose}
+                style={{ background: "none", border: "none", color: C.sub, cursor: "pointer", padding: 0, lineHeight: 1 }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={C.sub} strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+              </button>
+            </div>
+
+            <HelpSection title="◆ このツールで求められるもの">
+              現在の株価に、市場がどれだけの「将来の成長」または「投資家が要求する期待リターン」を織り込んでいるかを、
+              残余利益モデル（Residual Income Valuation）を使って逆算します。株価そのものを予測するツールではなく、
+              今の株価が前提としている数値を可視化するものです。
+            </HelpSection>
+
+            <HelpSection title="◆ 入力すべき数値">
+              <ul style={{ margin: "6px 0 0", paddingLeft: 20, lineHeight: 1.9 }}>
+                <li>株価 [P₀]</li>
+                <li>一株当たり純資産・簿価 [B₀]</li>
+                <li>第1期の予想EPS [E₁]</li>
+                <li>第1期の予想DPS [D₁]（任意・清算後の簿価計算に使用）</li>
+                <li>要求リターン r、または想定成長率 g（モードにより選択）</li>
+              </ul>
+            </HelpSection>
+
+            <HelpSection title="◆ インプライド成長率モード（g）">
+              第1期の情報だけでも計算できますが、第2期の予想EPS・DPSも<b>任意で追加入力</b>できます。
+              追加すると、クリーンサープラス関係（BPS₁ = BPS₀ + EPS₁ − DPS₁）で算出した第2期の残余利益まで
+              明示的に織り込んだ、より精緻な成長率を算出します。
+            </HelpSection>
+
+            <HelpSection title="◆ インプライド期待リターンモード（r）">
+              こちらは<b>第1期までの入力に固定</b>しています。第2期まで含めると数値解法（反復計算）が必要になり
+              計算が複雑化するため、現在の仕様では対応していません。
+            </HelpSection>
+          </div>
+        </div>
+      );
+    }
+
+    function HelpSection({ title, children }) {
+      return (
+        <div style={{ marginBottom: 22 }}>
+          <div style={{ fontSize: 12, fontWeight: 900, color: C.cyan, letterSpacing: "0.08em", marginBottom: 8 }}>
+            {title}
+          </div>
+          <div style={{ fontSize: 13, color: C.ink, lineHeight: 1.9 }}>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    function Row({ label, value, strong, color }) {
+      return (
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 0", borderBottom: `1px solid ${C.line}`, alignItems: "center" }}>
+          <span style={{ fontSize: 13, color: strong ? C.ink : C.sub, fontWeight: strong ? 800 : 500 }}>{label}</span>
+          <span style={{ fontFamily: MONO, fontSize: 14, color: color || C.ink, fontWeight: 700 }}>{value}</span>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<ValuationTool />);
+  </script>
+</body>
+</html>
