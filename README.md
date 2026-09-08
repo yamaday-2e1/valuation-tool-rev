@@ -1,6 +1,6 @@
 # Reverse Engineering Valuation Tool
 
-残余利益モデル（Residual Income Valuation）を用いて、**現在の株価に市場が織り込んでいる成長率・要求リターンを逆算するValuation Tool**です。
+残余利益モデル（Residual Income Valuation）を用いて、**現在の株価に市場が織り込んでいる成長率・期待リターンを逆算するValuation Tool**です。
 
 ## Demo
 
@@ -28,4 +28,4 @@
 * HTML
 * CSS
 * JavaScript
-* Claude Code
+* Claude Code（実装・コード生成の補助）
