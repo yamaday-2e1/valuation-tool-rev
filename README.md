@@ -4,7 +4,7 @@
 
 ## Demo
 
-[Web Tool]([ここにURL](https://yamaday-2e1.github.io/valuation-tool-rev/))
+[Web Tool](https://yamaday-2e1.github.io/valuation-tool-rev/)
 
 ## 概要
 
